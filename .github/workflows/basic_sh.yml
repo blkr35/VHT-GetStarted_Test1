@@ -1,0 +1,96 @@
+# This is a basic workflow to help you get started with Actions on CMSIS projects
+# See also https://community.arm.com/developer/tools-software/tools/b/tools-software-ides-blog/posts/infrastructure-for-continuous-integration-tests
+
+name: Arm Virtual Hardware basic example - self hosted - remote AWS
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - .github/workflows/basic.yml
+      - basic/**/*
+  pull_request:
+    branches: [ main ]
+    paths:
+      - .github/workflows/basic.yml
+      - basic/**/*
+
+# To allow you to run this workflow manually from the GitHub Actions tab add
+  workflow_dispatch:
+
+jobs:
+  ci_test:
+    runs-on: self-hosted
+    env:
+      working-directory: ${{ github.workspace }}/basic/
+      log-directory: ${{ github.workspace }}/log
+    outputs:
+      vhtresult: ${{ steps.vht.conclusion }}
+      testbadge: ${{ steps.result.outputs.badge }}
+    steps:
+    - name: Check out repository code
+      uses: actions/checkout@v2
+      
+    - name: Install Python packages
+      run: pip install -r basic/requirements.txt
+      
+    - name: Build software
+      run: cbuild.sh basic.debug.cprj --quiet
+      working-directory: ${{env.working-directory}}
+
+    - name: Run software
+      run: VHT_Corstone_SSE-300_Ethos-U55 -f vht_config.txt -a Objects/basic.axf > basic.axf.stdio
+      working-directory: ${{env.working-directory}}
+
+    - name: Process results from VHT
+      id: result
+      run: |
+          cp Objects/basic.axf .
+          cp basic.axf.stdio vht-$(date +'%Y%m%d%H%M%S').log
+          ./build.py --verbose -t debug report
+      working-directory: ${{env.working-directory}}
+
+    - name: Archive results
+      uses: actions/upload-artifact@v2
+      with:
+        name: results
+        path: |
+          basic/basic.axf
+          basic/vht-*.log
+          basic/basic-*.xunit
+        retention-days: 1
+        if-no-files-found: error
+      if: always()
+
+    - name: Publish test results
+      uses: mikepenz/action-junit-report@v2
+      with:
+        check_name: "Test results"
+        report_paths: basic/basic-*.xunit
+
+  badge:
+    if: always() && github.event_name == 'push'
+    runs-on: self-hosted
+    needs: ci_test
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v2
+        with:
+          ref: badges
+
+      - name: Update badge
+        run: |
+          mkdir -p .github/badges
+          cd .github/badges
+          rm -f basic.yml.*.svg
+          if [[ "${{ needs.ci_test.outputs.vhtresult }}" == "success" ]]; then
+            cp vht-completed.svg basic.yml.vht.svg
+          else
+            cp vht-failed.svg basic.yml.vht.svg
+          fi
+          curl -o basic.yml.unittest.svg https://img.shields.io/badge/${{ needs.ci_test.outputs.testbadge }}
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add basic.yml.*.svg
+          if git commit -m "Update badges for workflow basic.yml"; then
+            git push
+          fi
