@@ -2,6 +2,7 @@
 # See also https://community.arm.com/developer/tools-software/tools/b/tools-software-ides-blog/posts/infrastructure-for-continuous-integration-tests
 
 name: [self-hosted] Arm Virtual Hardware basic example - remote AWS
+
 on:
   push:
     branches: [ main ]
